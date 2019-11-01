@@ -101,7 +101,7 @@ def svm_loss_vectorized(W, X, y, reg):
     # loss.                                                                     #
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-    dW = reg * W
+    dW = 2 * reg * W
     margins[margins>0] = 1
     margins[np.arange(n),y] = -np.sum(margins,1)
     dW += (X.T.dot(margins) / n)
