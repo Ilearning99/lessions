@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """This program plays a game of Rock, Paper, Scissors between two Players,
 and reports both Player's scores each round."""
+
 import random
 
 moves = ['rock', 'paper', 'scissors']
