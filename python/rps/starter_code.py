@@ -32,23 +32,39 @@ class HumanPlayer(Player):
                 return next_move
 
 
-class ReflectPlayer(Player):
-    pre_move = "rock"
+class ReflectPlayer(RandomPlayer):
+    def __init__(self):
+        self.my_move = ""
+        self.their_move = ""
 
     def move(self):
-        return pre_move
+        if their_move == "":
+            return super().move()
+        return their_move
 
     def learn(self, my_move, their_move):
-        pre_move = their_move
+        self.my_move = my_move
+        self.their_move = their_move
 
 
-class CyclePlayer(Player):
-    pre_move = 0
+class CyclePlayer(RandomPlayer):
+    def __init__(self):
+        self.my_move = ""
+        self.their_move = ""
 
     def move(self):
-        pre_move += 1
-        pre_move %= 3
-        return moves[pre_move]
+        if self.my_move == "":
+            return super().move()
+        elif self.my_move == "rock":
+            return "paper"
+        elif self.my_move == "paper":
+            return "scissors"
+        else:
+            return "rock"
+
+    def learn(self, my_move, their_move):
+        self.my_move = my_move
+        self.their_move = their_move
 
 
 def beats(one, two):
@@ -98,5 +114,5 @@ class Game:
 
 
 if __name__ == '__main__':
-    game = Game(HumanPlayer(), RandomPlayer())
+    game = Game(HumanPlayer(), CyclePlayer())
     game.play_game()
