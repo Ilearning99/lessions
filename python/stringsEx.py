@@ -100,9 +100,24 @@
 # print(locate_all('yesyesyes','yes'))
 # print(locate_all('the upside down','barb'))
 
-def breakify(lines):
-	return "<br>".join(lines)
-lines = ["Haiku frogs in snow",
-         "A limerick came from Nantucket",
-         "Tetrametric drum-beats thrumming, Hiawathianic rhythm."]
-print(breakify(lines))
+# def breakify(lines):
+# 	return "<br>".join(lines)
+# lines = ["Haiku frogs in snow",
+#          "A limerick came from Nantucket",
+#          "Tetrametric drum-beats thrumming, Hiawathianic rhythm."]
+# print(breakify(lines))
+
+# def extract_place(name):
+# 	index = 0
+# 	begin = -1
+# 	end = -1
+# 	while index < len(name):
+# 		if name[index] == '_':
+# 			if begin == -1:
+# 				begin = index
+# 			else:
+# 				end = index
+# 				break
+# 		index += 1
+# 	return name[begin+1:end]
+# print(extract_place("2018-06-06_MountainView_16:20:00.jpg"))
