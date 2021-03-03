@@ -170,43 +170,91 @@ def get_test_dataset(ordered=False):
 
 # 在TPU策略上定义模型
 # 使用keras接口
+# modelA
 with strategy.scope():
-    pretrained_model = tf.keras.applications.VGG16(weights='imagenet', 
+    # dense net 201
+    pretrained_model = tf.keras.applications.DenseNet201(weights='imagenet', 
       include_top=False, input_shape=[*IMAGE_SIZE, 3])
-    # 预训练模型只用于抽取特征
-    # pretrained_model.trainable = False
 
-    # 最后两层进行fine tune
     pretrained_model.trainable = True
-    num_finetune_layer = 2
-    for layer in pretrained_model.layers[:-num_finetune_layer]:
-        layer.trainable = False
 
-    model = tf.keras.Sequential([
+    modelA = tf.keras.Sequential([
         pretrained_model,
         tf.keras.layers.GlobalAveragePooling2D(),
         tf.keras.layers.Dense(512, activation='relu'),
         tf.keras.layers.Dense(512, activation='relu'),
         tf.keras.layers.Dense(len(CLASSES), activation='softmax')
     ])
-
-model.compile(
+    
+modelA.compile(
     optimizer='adam',
     loss='sparse_categorical_crossentropy',
     metrics=['sparse_categorical_accuracy']
 )
-model.summary()
 
-history = model.fit(get_training_dataset(), 
-  steps_per_epoch=STEPS_PER_EPOCH, epochs=EPOCHS, 
+# modelB
+with strategy.scope(): 
+    # Inception v3
+    pretrained_model = tf.keras.applications.InceptionV3(weights='imagenet', 
+      include_top=False, input_shape=[*IMAGE_SIZE, 3])
+    
+    pretrained_model.trainable = True
+
+    modelB = tf.keras.Sequential([
+        pretrained_model,
+        tf.keras.layers.GlobalAveragePooling2D(),
+        tf.keras.layers.Dense(512, activation='relu'),
+        tf.keras.layers.Dense(256, activation='relu'),
+        tf.keras.layers.Dense(len(CLASSES), activation='softmax')
+    ])
+    
+modelB.compile(
+    optimizer='adam',
+    loss='sparse_categorical_crossentropy',
+    metrics=['sparse_categorical_accuracy']
+)
+
+# 学习率变化函数
+def lrfn(epoch):
+    LR_START = 0.00001
+    LR_MAX = 0.00005 * strategy.num_replicas_in_sync
+    LR_MIN = 0.00001
+    LR_RAMPUP_EPOCHS = 5
+    LR_SUSTAIN_EPOCHS = 0
+    LR_EXP_DECAY = .8
+    if epoch < LR_RAMPUP_EPOCHS:
+        lr = (LR_MAX - LR_START) / LR_RAMPUP_EPOCHS * epoch + LR_START
+    elif epoch < LR_RAMPUP_EPOCHS + LR_SUSTAIN_EPOCHS:
+        lr =  LR_MAX
+    else:
+        lr = (LR_MAX - LR_MIN) * LR_EXP_DECAY ** (epoch - LR_RAMPUP_EPOCHS - LR_SUSTAIN_EPOCHS) + LR_MIN
+    return lr
+
+lr_callback = tf.keras.callbacks.LearningRateScheduler(lrfn, verbose=True)
+
+print("begin the training of modelA")
+history = modelA.fit(get_training_dataset(), 
+  steps_per_epoch=STEPS_PER_EPOCH, epochs=EPOCHS,
+  callbacks = [lr_callback],
   validation_data=get_validation_dataset())
+print("the end of modelA training")
+
+print("begin the training of modelB")
+history = modelB.fit(get_training_dataset(), 
+  steps_per_epoch=STEPS_PER_EPOCH, epochs=EPOCHS,
+  callbacks = [lr_callback],
+  validation_data=get_validation_dataset())
+print("the end of modelB training")
+
+# 模型集合
+models = [modelA, modelB]
 
 # 获取验证结果
 validate_dataset = get_validation_dataset(ordered=True) # 顺序获取验证数据
 validate_image_dataset = validate_dataset.map(lambda image, label: image)
 validate_label_dataset = validate_dataset.map(lambda image, label: label).unbatch()
 validate_labels = next(iter(validate_label_dataset.batch(NUM_VALIDATION_IMAGES))).numpy()
-validate_pre_prob = model.predict(validate_image_dataset)
+validate_pre_prob = np.average([model.predict(validate_image_dataset) for model in models],axis=0)
 validate_pre_label = np.argmax(validate_pre_prob, axis=-1)
 score = f1_score(validate_labels, validate_pre_label, 
   labels=range(len(CLASSES)), average='macro')
@@ -219,7 +267,7 @@ print('f1 score: {:.3f}, precision: {:.3f}, recall: {:.3f}'.format(score, precis
 # 获取测试结果
 test_dataset = get_test_dataset(ordered=True) # 顺序获取测试数据集
 test_image_dataset = test_dataset.map(lambda image, idnum: image) # 只获取其中的图片
-test_pre_prob = model.predict(test_image_dataset) # 预测评分
+test_pre_prob = np.average([model.predict(test_image_dataset) for model in models],axis=0)# 预测评分
 test_pre_label = np.argmax(test_pre_prob, axis=-1)
 
 # 生成提交结果
@@ -227,4 +275,3 @@ test_id_dataset = test_dataset.map(lambda image, idnum: idnum).unbatch()
 test_ids = next(iter(test_id_dataset.batch(NUM_TEST_IMAGES))).numpy().astype('U') # id转为numpy数组
 np.savetxt('submission.csv',np.rec.fromarrays([test_ids, test_pre_label]),
   fmt=['%s','%d'], delimiter=',', header='id,label', comments='')
-!head submission.csv

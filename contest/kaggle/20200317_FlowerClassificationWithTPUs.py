@@ -38,7 +38,7 @@ print("GCS_DS_PATH:" + GCS_DS_PATH)
 
 # 读取数据
 IMAGE_SIZE = [192, 192] #归一化图片大小
-EPOCHS = 1 #训练轮数
+EPOCHS = 25 #训练轮数
 BATCH_SIZE = 128 * strategy.num_replicas_in_sync
 
 GCS_PATH_SELECT = { # available image sizes 可以获取不同大小的图片
@@ -171,25 +171,38 @@ def get_test_dataset(ordered=False):
 # 在TPU策略上定义模型
 # 使用keras接口
 with strategy.scope():
-    pretrained_model = tf.keras.applications.VGG16(weights='imagenet', 
+#     # vgg16, 最后两层2s TPU 每一个epoch
+#     pretrained_model = tf.keras.applications.VGG16(weights='imagenet', 
+#       include_top=False, input_shape=[*IMAGE_SIZE, 3])
+    
+#     # dense net 201
+#     pretrained_model = tf.keras.applications.DenseNet201(weights='imagenet', 
+#       include_top=False, input_shape=[*IMAGE_SIZE, 3])
+    
+    # Inception v3
+    pretrained_model = tf.keras.applications.InceptionV3(weights='imagenet', 
       include_top=False, input_shape=[*IMAGE_SIZE, 3])
-    # 预训练模型只用于抽取特征
-    # pretrained_model.trainable = False
-
-    # 最后两层进行fine tune
+    
+#     # 预训练模型只用于抽取特征
+#     pretrained_model.trainable = False
+    # 整体fine tune
     pretrained_model.trainable = True
-    num_finetune_layer = 2
-    for layer in pretrained_model.layers[:-num_finetune_layer]:
-        layer.trainable = False
+
+#     # 最后两层进行fine tune
+#     pretrained_model.trainable = True
+#     num_finetune_layer = 2
+#     for layer in pretrained_model.layers[:-num_finetune_layer]:
+#         layer.trainable = False
 
     model = tf.keras.Sequential([
         pretrained_model,
         tf.keras.layers.GlobalAveragePooling2D(),
         tf.keras.layers.Dense(512, activation='relu'),
-        tf.keras.layers.Dense(512, activation='relu'),
+        tf.keras.layers.Dense(256, activation='relu'),
+        tf.keras.layers.Dense(256, activation='relu'),
         tf.keras.layers.Dense(len(CLASSES), activation='softmax')
     ])
-
+    
 model.compile(
     optimizer='adam',
     loss='sparse_categorical_crossentropy',
@@ -197,8 +210,27 @@ model.compile(
 )
 model.summary()
 
+# 学习率变化函数
+def lrfn(epoch):
+    LR_START = 0.00001
+    LR_MAX = 0.00005 * strategy.num_replicas_in_sync
+    LR_MIN = 0.00001
+    LR_RAMPUP_EPOCHS = 5
+    LR_SUSTAIN_EPOCHS = 0
+    LR_EXP_DECAY = .8
+    if epoch < LR_RAMPUP_EPOCHS:
+        lr = (LR_MAX - LR_START) / LR_RAMPUP_EPOCHS * epoch + LR_START
+    elif epoch < LR_RAMPUP_EPOCHS + LR_SUSTAIN_EPOCHS:
+        lr =  LR_MAX
+    else:
+        lr = (LR_MAX - LR_MIN) * LR_EXP_DECAY ** (epoch - LR_RAMPUP_EPOCHS - LR_SUSTAIN_EPOCHS) + LR_MIN
+    return lr
+
+lr_callback = tf.keras.callbacks.LearningRateScheduler(lrfn, verbose=True)
+
 history = model.fit(get_training_dataset(), 
-  steps_per_epoch=STEPS_PER_EPOCH, epochs=EPOCHS, 
+  steps_per_epoch=STEPS_PER_EPOCH, epochs=EPOCHS,
+  callbacks = [lr_callback],
   validation_data=get_validation_dataset())
 
 # 获取验证结果
@@ -227,4 +259,3 @@ test_id_dataset = test_dataset.map(lambda image, idnum: idnum).unbatch()
 test_ids = next(iter(test_id_dataset.batch(NUM_TEST_IMAGES))).numpy().astype('U') # id转为numpy数组
 np.savetxt('submission.csv',np.rec.fromarrays([test_ids, test_pre_label]),
   fmt=['%s','%d'], delimiter=',', header='id,label', comments='')
-!head submission.csv
